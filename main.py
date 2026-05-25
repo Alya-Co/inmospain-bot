@@ -512,16 +512,32 @@ def process(sender_id, name, text, lang):
 def handle_msg(sender_id, name, text):
     state = user_states.get(sender_id, {})
     lang  = state.get("lang")
-    if not lang:
+    step  = state.get("step")
+
+    # Сброс по ключевым словам
+    reset_words = ["start","reset","привет","hello","hola","hi","begin"]
+    if text.lower().strip() in reset_words or not lang:
+        user_states[sender_id] = {}
         send_lang_buttons(sender_id)
-        user_states[sender_id] = {"lang":None,"step":"await_lang"}
         return
-    if state.get("step") == "await_link":
+
+    # После получения отчёта — спрашиваем новый объект
+    if step == "done":
+        user_states[sender_id] = {"lang":lang,"step":"await_link"}
+        send_msg(sender_id, MSGS["ask"][lang])
+        return
+
+    if step == "await_link":
         if len(text.strip()) > 8:
             user_states[sender_id]["step"] = "processing"
             process(sender_id, name, text.strip(), lang)
         else:
             send_msg(sender_id, MSGS["invalid"][lang])
+        return
+
+    # Любое другое — показываем кнопки
+    send_lang_buttons(sender_id)
+    user_states[sender_id] = {}
 
 def handle_postback(sender_id, name, payload):
     lmap = {"LANG_EN":"en","LANG_RU":"ru","LANG_ES":"es"}
