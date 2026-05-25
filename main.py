@@ -1,7 +1,8 @@
-import os, io, re, json, requests, urllib.request, shutil
+import os, io, re, json, requests, shutil
 from flask import Flask, request, jsonify
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfbase.pdfmetrics import registerFontFamily
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.styles import ParagraphStyle
@@ -17,37 +18,53 @@ TELEGRAM_TOKEN    = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT     = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 # ─── ШРИФТЫ ───────────────────────────────────────────────────────────────────
-FONT_REG  = "/tmp/font_reg.ttf"
-FONT_BOLD = "/tmp/font_bold.ttf"
+# Имена шрифтов которые будем использовать
+F  = "MyFont"       # regular
+FB = "MyFont-Bold"  # bold
 
 def setup_fonts():
-    """Копируем системные шрифты или скачиваем DejaVu"""
-    # Пробуем системные Liberation
-    lib_reg  = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
-    lib_bold = "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"
+    """Регистрируем шрифты с семейством для правильной работы ReportLab"""
+    # Пути к системным Liberation шрифтам (есть на Ubuntu/Debian)
+    paths = {
+        "reg":  "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "bold": "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+        "ital": "/usr/share/fonts/truetype/liberation/LiberationSans-Italic.ttf",
+        "bi":   "/usr/share/fonts/truetype/liberation/LiberationSans-BoldItalic.ttf",
+    }
 
-    if os.path.exists(lib_reg) and os.path.exists(lib_bold):
-        shutil.copy(lib_reg,  FONT_REG)
-        shutil.copy(lib_bold, FONT_BOLD)
-    else:
-        # Скачиваем DejaVu
-        base = "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/fonts/"
-        for url, dst in [(base+"DejaVuSans.ttf", FONT_REG),
-                         (base+"DejaVuSans-Bold.ttf", FONT_BOLD)]:
+    # Проверяем наличие
+    all_exist = all(os.path.exists(p) for p in paths.values())
+
+    if not all_exist:
+        # Пробуем скачать DejaVu
+        import urllib.request
+        os.makedirs("/tmp/fonts", exist_ok=True)
+        base = "https://raw.githubusercontent.com/dejavu-fonts/dejavu-fonts/master/fonts/"
+        font_files = {
+            "reg":  ("DejaVuSans.ttf",         "/tmp/fonts/reg.ttf"),
+            "bold": ("DejaVuSans-Bold.ttf",     "/tmp/fonts/bold.ttf"),
+            "ital": ("DejaVuSans-Oblique.ttf",  "/tmp/fonts/ital.ttf"),
+            "bi":   ("DejaVuSans-BoldOblique.ttf", "/tmp/fonts/bi.ttf"),
+        }
+        for key, (fname, dst) in font_files.items():
             try:
-                urllib.request.urlretrieve(url, dst)
+                urllib.request.urlretrieve(base + fname, dst)
+                paths[key] = dst
             except Exception as e:
-                print(f"Font download error: {e}")
+                print(f"Font download error {fname}: {e}")
 
-    # Регистрируем с полным именем (не аббревиатура!)
     try:
-        pdfmetrics.registerFont(TTFont("CustomRegular", FONT_REG))
-        pdfmetrics.registerFont(TTFont("CustomBold",    FONT_BOLD))
-        print("Fonts registered OK")
-        return True
+        pdfmetrics.registerFont(TTFont(F,           paths["reg"]))
+        pdfmetrics.registerFont(TTFont(FB,          paths["bold"]))
+        pdfmetrics.registerFont(TTFont(F+"-Italic", paths["ital"]))
+        pdfmetrics.registerFont(TTFont(FB+"-BI",    paths["bi"]))
+        # Регистрируем семейство — это ключевой шаг!
+        registerFontFamily(F,
+            normal=F, bold=FB,
+            italic=F+"-Italic", boldItalic=FB+"-BI")
+        print("Fonts OK:", F, FB)
     except Exception as e:
-        print(f"Font register error: {e}")
-        return False
+        print(f"Font setup error: {e}")
 
 # Регистрируем при старте
 setup_fonts()
@@ -194,8 +211,8 @@ def calc_income(precio, area_util):
 
 # ─── PDF ──────────────────────────────────────────────────────────────────────
 def generate_pdf(data):
-    R = "CustomRegular"
-    B = "CustomBold"
+    R = F   # "MyFont"
+    B = FB  # "MyFont-Bold"
 
     def S(nm, bold=False, size=10, color="#212121", align=TA_LEFT, **kw):
         return ParagraphStyle(nm, fontName=B if bold else R,
