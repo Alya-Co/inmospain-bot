@@ -18,55 +18,23 @@ TELEGRAM_TOKEN    = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT     = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 # ─── ШРИФТЫ ───────────────────────────────────────────────────────────────────
-# Имена шрифтов которые будем использовать
-F  = "MyFont"       # regular
-FB = "MyFont-Bold"  # bold
+F  = "MyFont"
+FB = "MyFont-Bold"
 
 def setup_fonts():
-    """Регистрируем шрифты с семейством для правильной работы ReportLab"""
-    # Пути к системным Liberation шрифтам (есть на Ubuntu/Debian)
-    paths = {
-        "reg":  "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-        "bold": "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-        "ital": "/usr/share/fonts/truetype/liberation/LiberationSans-Italic.ttf",
-        "bi":   "/usr/share/fonts/truetype/liberation/LiberationSans-BoldItalic.ttf",
-    }
-
-    # Проверяем наличие
-    all_exist = all(os.path.exists(p) for p in paths.values())
-
-    if not all_exist:
-        # Пробуем скачать DejaVu
-        import urllib.request
-        os.makedirs("/tmp/fonts", exist_ok=True)
-        base = "https://raw.githubusercontent.com/dejavu-fonts/dejavu-fonts/master/fonts/"
-        font_files = {
-            "reg":  ("DejaVuSans.ttf",         "/tmp/fonts/reg.ttf"),
-            "bold": ("DejaVuSans-Bold.ttf",     "/tmp/fonts/bold.ttf"),
-            "ital": ("DejaVuSans-Oblique.ttf",  "/tmp/fonts/ital.ttf"),
-            "bi":   ("DejaVuSans-BoldOblique.ttf", "/tmp/fonts/bi.ttf"),
-        }
-        for key, (fname, dst) in font_files.items():
-            try:
-                urllib.request.urlretrieve(base + fname, dst)
-                paths[key] = dst
-            except Exception as e:
-                print(f"Font download error {fname}: {e}")
+    # Шрифты лежат в папке fonts/ рядом с main.py
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    reg  = os.path.join(base_dir, "fonts", "reg.ttf")
+    bold = os.path.join(base_dir, "fonts", "bold.ttf")
 
     try:
-        pdfmetrics.registerFont(TTFont(F,           paths["reg"]))
-        pdfmetrics.registerFont(TTFont(FB,          paths["bold"]))
-        pdfmetrics.registerFont(TTFont(F+"-Italic", paths["ital"]))
-        pdfmetrics.registerFont(TTFont(FB+"-BI",    paths["bi"]))
-        # Регистрируем семейство — это ключевой шаг!
-        registerFontFamily(F,
-            normal=F, bold=FB,
-            italic=F+"-Italic", boldItalic=FB+"-BI")
-        print("Fonts OK:", F, FB)
+        pdfmetrics.registerFont(TTFont(F,  reg))
+        pdfmetrics.registerFont(TTFont(FB, bold))
+        registerFontFamily(F, normal=F, bold=FB, italic=F, boldItalic=FB)
+        print(f"Fonts OK: {reg}")
     except Exception as e:
-        print(f"Font setup error: {e}")
+        print(f"Font error: {e}")
 
-# Регистрируем при старте
 setup_fonts()
 
 # ─── ВСПОМОГАТЕЛЬНЫЕ ──────────────────────────────────────────────────────────
@@ -211,8 +179,8 @@ def calc_income(precio, area_util):
 
 # ─── PDF ──────────────────────────────────────────────────────────────────────
 def generate_pdf(data):
-    R = F   # "MyFont"
-    B = FB  # "MyFont-Bold"
+    R = F
+    B = FB
 
     def S(nm, bold=False, size=10, color="#212121", align=TA_LEFT, **kw):
         return ParagraphStyle(nm, fontName=B if bold else R,
