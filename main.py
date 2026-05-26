@@ -124,39 +124,122 @@ def get_distance_sea(lat, lon):
     return "N/A"
 
 def parse_idealista(url):
-    hdrs = {"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept-Language":"es-ES,es;q=0.9"}
-    d = {"precio":None,"area":None,"area_util":None,"parcela":None,
-         "habitaciones":None,"banos":None,"ano":None,"orientacion":None,
-         "garaje":False,"piscina":False,"jardin":False,"comunidad":None,"barrio":"N/A"}
+    """Парсим Idealista через ScraperAPI + Claude Vision"""
+    import base64, os
+
+    SCRAPER_KEY    = os.environ.get("SCRAPER_API_KEY", "")
+    ANTHROPIC_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
+
+    empty = {"precio":None,"area":None,"area_util":None,"parcela":None,
+             "habitaciones":None,"banos":None,"ano":None,"orientacion":None,
+             "garaje":False,"piscina":False,"jardin":False,"comunidad":None,"barrio":"N/A"}
+
+    # Шаг 1: Получаем HTML через ScraperAPI или напрямую
+    html = ""
     try:
-        r = requests.get(url, headers=hdrs, timeout=15)
-        if r.status_code != 200: return d
-        html = r.text
-        patterns = {
-            "precio":      r'"price"\s*:\s*(\d+)',
-            "area":        r'(\d+)\s*m\xb2\s*construidos',
-            "area_util":   r'(\d+)\s*m\xb2\s*[uú]tiles',
-            "parcela":     r'[Pp]arcela\s+de\s+(\d+)\s*m\xb2',
-            "habitaciones":r'(\d+)\s+habitaciones?',
-            "banos":       r'(\d+)\s+ba[nñ]os?',
-            "ano":         r'[Cc]onstruido en (\d{4})',
-            "orientacion": r'[Oo]rientaci[oó]n?\s+(norte|sur|este|oeste|noreste|noroeste|sureste|suroeste)',
-            "comunidad":   r'[Gg]astos de comunidad\s+(\d+)',
-        }
-        for key, pat in patterns.items():
-            m = re.search(pat, html)
-            if m:
-                val = m.group(1)
-                d[key] = int(val) if key not in ("orientacion",) else val.capitalize()
-        d["garaje"]  = bool(re.search(r'[Gg]araje|[Pp]laza de garaje', html))
-        d["piscina"] = bool(re.search(r'[Pp]iscina', html))
-        d["jardin"]  = bool(re.search(r'[Jj]ard[ií]n', html))
-        m = re.search(r'barrio\s+([^<"]{3,50})', html, re.IGNORECASE)
-        if m: d["barrio"] = m.group(1).strip()
+        if SCRAPER_KEY:
+            scraper_url = f"http://api.scraperapi.com?api_key={SCRAPER_KEY}&url={url}&render=true"
+            r = requests.get(scraper_url, timeout=30)
+        else:
+            hdrs = {"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "Accept-Language":"es-ES,es;q=0.9",
+                    "Accept":"text/html,application/xhtml+xml"}
+            r = requests.get(url, headers=hdrs, timeout=15)
+        if r.status_code == 200:
+            html = r.text
     except Exception as e:
-        print(f"Idealista error: {e}")
+        print(f"Fetch error: {e}")
+
+    # Шаг 2: Сначала пробуем regex парсинг
+    d = dict(empty)
+    if html:
+        try:
+            patterns = {
+                "precio":       r'"price"\s*:\s*(\d+)',
+                "area":         r'(\d+)\s*m²\s*construidos',
+                "area_util":    r'(\d+)\s*m²\s*[uú]tiles',
+                "parcela":      r'[Pp]arcela\s+de\s+(\d+)\s*m²',
+                "habitaciones": r'(\d+)\s+habitacion',
+                "banos":        r'(\d+)\s+ba[nñ]o',
+                "ano":          r'[Cc]onstruido en (\d{4})',
+                "orientacion":  r'[Oo]rientaci[oó]n\s+(norte|sur|este|oeste|noreste|noroeste|sureste|suroeste)',
+                "comunidad":    r'[Gg]astos.*?(\d+).*?mes',
+            }
+            for key, pat in patterns.items():
+                m = re.search(pat, html, re.IGNORECASE)
+                if m:
+                    val = m.group(1)
+                    d[key] = val.capitalize() if key == "orientacion" else int(val)
+            d["garaje"]  = bool(re.search(r'garaje|plaza.*garage', html, re.IGNORECASE))
+            d["piscina"] = bool(re.search(r'piscina', html, re.IGNORECASE))
+            d["jardin"]  = bool(re.search(r'jard[ií]n', html, re.IGNORECASE))
+            m = re.search(r'barrio[^>]*?>([^<]{3,40})', html, re.IGNORECASE)
+            if not m:
+                m = re.search(r'"neighborhood"\s*:\s*"([^"]{3,50})"', html)
+            if m: d["barrio"] = m.group(1).strip()
+        except Exception as e:
+            print(f"Regex error: {e}")
+
+    # Шаг 3: Если основные данные не получены — используем Claude Vision
+    missing = not d.get("precio") or not d.get("area")
+    if missing and ANTHROPIC_KEY and html:
+        try:
+            # Берём первые 8000 символов HTML — там обычно все данные
+            html_chunk = html[:8000]
+
+            prompt = f"""Из этого HTML страницы Idealista извлеки данные об объекте недвижимости.
+Верни ТОЛЬКО JSON без пояснений:
+{{
+  "precio": число или null,
+  "area": число м² построенных или null,
+  "area_util": число м² полезных или null,
+  "parcela": число м² участка или null,
+  "habitaciones": число или null,
+  "banos": число или null,
+  "ano": год постройки число или null,
+  "orientacion": "Sur/Norte/Este/Oeste" или null,
+  "garaje": true/false,
+  "piscina": true/false,
+  "jardin": true/false,
+  "comunidad": число €/мес или null,
+  "barrio": "название района" или null
+}}
+
+HTML:
+{html_chunk}"""
+
+            resp = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": ANTHROPIC_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json"
+                },
+                json={
+                    "model": "claude-haiku-4-5-20251001",
+                    "max_tokens": 500,
+                    "messages": [{"role": "user", "content": prompt}]
+                },
+                timeout=30
+            )
+            if resp.status_code == 200:
+                text = resp.json()["content"][0]["text"]
+                # Извлекаем JSON
+                import json as json_lib
+                start = text.find("{")
+                end   = text.rfind("}") + 1
+                if start >= 0 and end > start:
+                    parsed = json_lib.loads(text[start:end])
+                    # Обновляем только незаполненные поля
+                    for k, v in parsed.items():
+                        if k in d and (d[k] is None or d[k] == "N/A" or d[k] is False):
+                            d[k] = v
+                    print(f"Claude extracted: precio={d.get('precio')}, area={d.get('area')}")
+        except Exception as e:
+            print(f"Claude Vision error: {e}")
+
     return d
+
 
 def calc_income(precio, area_util):
     rate = 9.5
