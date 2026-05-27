@@ -1,6 +1,7 @@
 import os, io, re, json, requests, shutil
 from datetime import datetime, date, timedelta
-from flask import Flask, request, jsonify import threading
+from flask import Flask, request, jsonify 
+import threading
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfbase.pdfmetrics import registerFontFamily
