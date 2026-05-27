@@ -1,6 +1,6 @@
 import os, io, re, json, requests, shutil
 from datetime import datetime, date, timedelta
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify import threading
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfbase.pdfmetrics import registerFontFamily
@@ -796,31 +796,39 @@ def verify():
     return "Forbidden", 403
 
 @app.route("/webhook", methods=["POST"])
+@app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
     if data.get("object") == "page":
-        for entry in data.get("entry",[]):
-            for ev in entry.get("messaging",[]):
-                sid  = ev["sender"]["id"]
-                name = "User"
-                try:
-                    p = requests.get(
-                        f"https://graph.facebook.com/{sid}?fields=first_name&access_token={PAGE_ACCESS_TOKEN}",
-                        timeout=5).json()
-                    name = p.get("first_name","User")
-                except: pass
+        for entry in data.get("entry", []):
+            for ev in entry.get("messaging", []):
+                # Запускаем обработку в отдельном потоке
+                t = threading.Thread(target=process_event, args=(ev,))
+                t.daemon = True
+                t.start()
+    return jsonify({"status": "ok"}), 200  # Сразу отвечаем Meta
 
-                if "message" in ev:
-                    msg = ev["message"]
-                    # Quick reply
-                    if "quick_reply" in msg:
-                        handle_quick_reply(sid, name, msg["quick_reply"]["payload"])
-                    elif "text" in msg:
-                        handle_msg(sid, name, msg["text"])
-                elif "postback" in ev:
-                    handle_postback(sid, name, ev["postback"]["payload"])
 
-    return jsonify({"status":"ok"}), 200
+def process_event(ev):
+    """Обработка события в фоне"""
+    sid = ev["sender"]["id"]
+    name = "User"
+    try:
+        p = requests.get(
+            f"https://graph.facebook.com/{sid}?fields=first_name&access_token={PAGE_ACCESS_TOKEN}",
+            timeout=5).json()
+        name = p.get("first_name", "User")
+    except:
+        pass
+
+    if "message" in ev:
+        msg = ev["message"]
+        if "quick_reply" in msg:
+            handle_quick_reply(sid, name, msg["quick_reply"]["payload"])
+        elif "text" in msg:
+            handle_msg(sid, name, msg["text"])
+    elif "postback" in ev:
+        handle_postback(sid, name, ev["postback"]["payload"])
 
 # Telegram callback для агента (подтверждение рассылки)
 @app.route("/telegram_callback", methods=["POST"])
