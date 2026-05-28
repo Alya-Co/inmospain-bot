@@ -358,7 +358,7 @@ def parse_idealista(url):
     html = ""
     try:
         if SCRAPER_KEY:
-            r = requests.get(f"https://api.scraperapi.com?api_key={SCRAPER_KEY}&url={url}&render=true&country_code=es", timeout=60)
+            r = requests.get(f"https://api.scraperapi.com?api_key={SCRAPER_KEY}&url={url}&render=true&country_code=es&premium=true", timeout=60)
         else:
             hdrs = {"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                     "Accept-Language":"es-ES,es;q=0.9"}
